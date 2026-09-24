@@ -1,0 +1,45 @@
+name: Poll Live Prices
+
+# Runs independently of the browser/app — GitHub's own servers execute this on
+# a schedule, whether or not anyone has the web app open.
+on:
+  schedule:
+    # every 15 minutes. GitHub does not guarantee exact timing for scheduled
+    # workflows (it can lag, especially under high platform load), but this
+    # keeps within GitHub's fair-use guidance for free scheduled runs.
+    - cron: '*/15 * * * *'
+  workflow_dispatch: {} # lets you trigger a run manually from the Actions tab
+
+permissions:
+  contents: write # needed to commit the updated data/ files back to the repo
+
+concurrency:
+  group: poll-prices
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run poller
+        env:
+          PARSE_API_KEY: ${{ secrets.PARSE_API_KEY }}
+        run: node poll.js
+
+      - name: Commit and push updated price data
+        run: |
+          git config user.name "price-poller-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/
+          if git diff --cached --quiet; then
+            echo "No price changes to commit."
+          else
+            git commit -m "chore: poll live prices [skip ci]"
+            git push
+          fi
