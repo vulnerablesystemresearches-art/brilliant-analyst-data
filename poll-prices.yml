@@ -7,7 +7,7 @@ on:
     # every 15 minutes. GitHub does not guarantee exact timing for scheduled
     # workflows (it can lag, especially under high platform load), but this
     # keeps within GitHub's fair-use guidance for free scheduled runs.
-    - cron: '*/15 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch: {} # lets you trigger a run manually from the Actions tab
 
 permissions:
