@@ -15,6 +15,19 @@ a browser. It now does **two** things:
    private to one browser.
 
 
+
+## Version 2.2 change: crypto is now tracked too
+
+The poller previously covered only forex and Moroccan stocks, so in global mode
+the shared Track Record and the Trading Insights had no crypto at all. It now
+also calls CoinGecko (the same top-30 request the app makes, one call per run),
+predicts on the same real 7-day hourly series the app uses, and logs/resolves
+crypto predictions exactly like the other markets under
+`data/predictions/crypto/`. Nothing else needs configuring — no key, no new
+secret. If CoinGecko rate-limits a run (it sometimes does for shared CI
+addresses), the poller retries twice, then skips crypto for that run only;
+it never writes placeholder data.
+
 ## Version 2.1 change: same engine as the app + indicator votes
 
 The poller now uses the web app's indicator engine verbatim (earlier versions

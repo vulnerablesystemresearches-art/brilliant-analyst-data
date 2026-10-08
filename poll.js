@@ -606,8 +606,54 @@ async function pollMoroccan() {
     }
 }
 
+
+// Same CoinGecko call the web app makes: top 30 coins with their real 7-day
+// hourly price series. That series is the history the app predicts on for
+// crypto, so the poller predicts on exactly the same thing — no accumulation
+// needed, and nothing fabricated. If CoinGecko can't be reached this run
+// (rate limit etc.), crypto is simply skipped; no placeholder data is written.
+const COINGECKO_URL = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=30&page=1&sparkline=true&price_change_percentage=1h,24h,7d';
+
+async function fetchCoinGeckoWithRetry() {
+    const waits = [0, 20000, 45000]; // shared CI IPs get rate-limited sometimes — back off and retry
+    let lastErr;
+    for (const wait of waits) {
+        if (wait) await new Promise(r => setTimeout(r, wait));
+        try {
+            const res = await fetch(COINGECKO_URL, { headers: { 'Accept': 'application/json', 'User-Agent': 'brilliant-trade-poller' } });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            if (!Array.isArray(data) || !data.length) throw new Error('empty response');
+            return data;
+        } catch (e) { lastErr = e; console.warn('[poller] coingecko attempt failed:', e.message); }
+    }
+    throw lastErr;
+}
+
+async function pollCrypto() {
+    try {
+        const coins = await fetchCoinGeckoWithRetry();
+        const seen = new Set();
+        let ok = 0;
+        for (const coin of coins) {
+            const symbol = coin.symbol ? String(coin.symbol).toUpperCase() : null;
+            const price = coin.current_price;
+            const series = coin.sparkline_in_7d && coin.sparkline_in_7d.price;
+            if (!symbol || seen.has(symbol) || typeof price !== 'number' || !(price > 0) || !Array.isArray(series)) continue;
+            seen.add(symbol);
+            resolvePendingPredictions('crypto', symbol, price);
+            maybeLogPrediction('crypto', symbol, price, series);
+            ok++;
+        }
+        console.log(`[poller] crypto: ${ok} coins processed`);
+    } catch (e) {
+        console.warn('[poller] crypto poll failed this run (skipped, nothing fabricated):', e.message);
+    }
+}
+
 (async () => {
     console.log('[poller] run started', new Date().toISOString());
+    await pollCrypto();
     await pollForex();
     await pollMoroccan();
     const summary = rebuildSummary();
