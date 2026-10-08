@@ -1,8 +1,8 @@
 {
-  "name": "brilliant-analyst-price-poller",
-  "version": "1.0.0",
+  "name": "brilliant-trade-poller",
+  "version": "2.0.0",
   "private": true,
-  "description": "Scheduled poller that builds real forex + Moroccan stock price history 24/7, independent of the Brilliant Analyst Model web app being open.",
+  "description": "Scheduled poller that builds real forex + Moroccan stock price history AND a shared, global prediction track record 24/7, independent of the Brilliant Trade web app being open.",
   "engines": {
     "node": ">=18"
   },
