@@ -39,6 +39,7 @@ const PRED_DIR = path.join(DATA_DIR, 'predictions');
 const MAX_POINTS_PER_SYMBOL = 2000; // price history cap (~3 weeks at 15-min cadence)
 const MAX_PRED_PER_SYMBOL = 500; // prediction log cap per symbol
 const MAX_RECENT_IN_SUMMARY = 300; // how many recent resolved calls the summary file lists individually
+const MAX_INSIGHT_ENTRIES = 3000; // compact up/down results published for the app's Trading Insights
 
 const PRED_RESOLUTION_MS = 4 * 60 * 60 * 1000; // evaluate at the 4h (max) horizon — same as the app
 const PRED_FLAT_THRESHOLD_PCT = { crypto: 0.3, forex: 0.05, moroccan: 0.15 }; // same thresholds as the app
@@ -547,6 +548,22 @@ function rebuildSummary() {
     allResolved.sort((a, b) => (b.resolvedAt || 0) - (a.resolvedAt || 0));
     summary.recent = allResolved.slice(0, MAX_RECENT_IN_SUMMARY);
 
+    // The 300-row `recent` list above feeds the Track Record tables, but it is far
+    // too short for statistics (and flat results fill much of it). The Trading
+    // Insights need every recent UP/DOWN result, so publish those separately in a
+    // compact tuple form: [market, symbol, confidence, direction, 1=correct|0=incorrect,
+    // predictedAt in seconds, pctMove, votes].
+    summary.insights = allResolved
+        .filter(e => e.outcome === 'correct' || e.outcome === 'incorrect')
+        .slice(0, MAX_INSIGHT_ENTRIES)
+        .map(e => [
+            e.assetClass, e.symbol, e.confidence, e.direction,
+            e.outcome === 'correct' ? 1 : 0,
+            Math.round((e.predictedAt || 0) / 1000),
+            typeof e.pctMove === 'number' ? Math.round(e.pctMove * 1000) / 1000 : 0,
+            e.votes || ''
+        ]);
+
     saveJson(path.join(PRED_DIR, '_summary.json'), summary);
     return summary;
 }
@@ -554,24 +571,32 @@ function rebuildSummary() {
 // ─── main polling routines ──────────────────────────────────────────────
 
 async function pollForex() {
-    let ok = 0, failed = 0;
-    for (const pair of FOREX_PAIRS) {
+    // Many pairs share a base currency, and one response already contains every
+    // target rate — so fetch each distinct base once (4 requests, not 32). Fewer
+    // calls to a free API that rate-limits, identical data.
+    const bases = [...new Set(FOREX_PAIRS.map(p => p.from))];
+    const rateMaps = {};
+    for (const base of bases) {
         try {
-            const res = await fetch(`https://open.er-api.com/v6/latest/${pair.from}`);
+            const res = await fetch(`https://open.er-api.com/v6/latest/${base}`);
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
-            const rate = data.rates && data.rates[pair.to];
-            if (!rate) throw new Error('no rate for ' + pair.to + ' in response');
-
-            const history = appendPricePoint('forex', pair.name, rate);
-            resolvePendingPredictions('forex', pair.name, rate);
-            maybeLogPrediction('forex', pair.name, rate, history.map(pt => pt.p));
-            ok++;
+            rateMaps[base] = data.rates || null;
         } catch (e) {
-            console.warn(`[poller] forex fetch failed for ${pair.name}:`, e.message);
-            failed++;
+            console.warn(`[poller] forex base ${base} failed:`, e.message);
+            rateMaps[base] = null;
         }
         await new Promise(r => setTimeout(r, 250)); // be polite to the free API
+    }
+
+    let ok = 0, failed = 0;
+    for (const pair of FOREX_PAIRS) {
+        const rate = rateMaps[pair.from] && rateMaps[pair.from][pair.to];
+        if (!rate) { console.warn(`[poller] no forex rate for ${pair.name}`); failed++; continue; }
+        const history = appendPricePoint('forex', pair.name, rate);
+        resolvePendingPredictions('forex', pair.name, rate);
+        maybeLogPrediction('forex', pair.name, rate, history.map(pt => pt.p));
+        ok++;
     }
     console.log(`[poller] forex: ${ok} updated, ${failed} failed`);
 }
