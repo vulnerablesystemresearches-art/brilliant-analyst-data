@@ -210,6 +210,20 @@ const TA = {
         return sum / period;
     },
 
+    // How jumpy the price is RIGHT NOW compared with that same asset's own
+    // normal: recent average move (ATR) divided by the average move across the
+    // whole series. ~1.0 = normal, below 0.8 = calmer than usual, above 1.25 =
+    // more volatile than usual. Being relative makes it comparable across assets.
+    volRatio(prices, period = 14) {
+        if (!prices || prices.length < period + 2) return null;
+        let total = 0;
+        for (let i = 1; i < prices.length; i++) total += Math.abs(prices[i] - prices[i - 1]);
+        const typical = total / (prices.length - 1);
+        const recent = this.atr(prices, period);
+        if (!typical || !isFinite(recent)) return null;
+        return Math.round((recent / typical) * 100) / 100;
+    },
+
     // Fixed order used everywhere votes are stored as a compact 7-char string
     // (e.g. "UDNUUDN") instead of an object — keeps each log entry tiny.
     VOTE_KEYS: ['rsi', 'macd', 'trend', 'bb', 'mom', 'range', 'slope'],
@@ -460,6 +474,7 @@ function maybeLogPrediction(assetClass, symbol, currentPrice, priceHistory) {
         direction: prediction.direction,
         confidence: prediction.confidence,
         votes,
+        volRatio: TA.volRatio(priceHistory), // volatility vs this asset's normal at prediction time
         priceAtPrediction: currentPrice,
         resolved: false, resolvedAt: null, priceAtResolution: null, outcome: null
     });
@@ -552,7 +567,7 @@ function rebuildSummary() {
     // too short for statistics (and flat results fill much of it). The Trading
     // Insights need every recent UP/DOWN result, so publish those separately in a
     // compact tuple form: [market, symbol, confidence, direction, 1=correct|0=incorrect,
-    // predictedAt in seconds, pctMove, votes].
+    // predictedAt in seconds, pctMove, votes, volRatio].
     summary.insights = allResolved
         .filter(e => e.outcome === 'correct' || e.outcome === 'incorrect')
         .slice(0, MAX_INSIGHT_ENTRIES)
@@ -561,7 +576,8 @@ function rebuildSummary() {
             e.outcome === 'correct' ? 1 : 0,
             Math.round((e.predictedAt || 0) / 1000),
             typeof e.pctMove === 'number' ? Math.round(e.pctMove * 1000) / 1000 : 0,
-            e.votes || ''
+            e.votes || '',
+            typeof e.volRatio === 'number' ? e.volRatio : null
         ]);
 
     saveJson(path.join(PRED_DIR, '_summary.json'), summary);
